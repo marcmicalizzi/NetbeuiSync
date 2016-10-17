@@ -35,6 +35,11 @@ CNC (i.e. \\nc0001\diskf), you would create a share for C:\sync on the new
 virtual (or physical) server, and point to that instead 
 (i.e. \\server\sync\nc0001\diskf)
 
+In the event there is an error with copying or mapping the network drive, it
+will attempt to disconnect and reconnect the network drive, and during the
+time it is offline, it will write a file +OFFLINE.TXT with the error number
+in the file, so as to indicate the share is offline.
+
 I've included a macro RUNASSERVICE in main.cpp which if defined will compile
 to run as a service, if not defined will not (currently in the initial import 
 it is not defined to run as a service).
