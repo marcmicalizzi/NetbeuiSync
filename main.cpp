@@ -75,7 +75,6 @@ VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 	}
 
 
-	// Tell the service controller we are started
 	g_ServiceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
 	g_ServiceStatus.dwCurrentState = SERVICE_RUNNING;
 	g_ServiceStatus.dwWin32ExitCode = 0;
@@ -87,7 +86,6 @@ VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 #endif
 	std::vector<SyncDirectory*> dirs;
 	std::vector<NETRESOURCE> resources;
-	// Start the thread that will perform the main task of the service
 	wchar_t localname[3] = L"G:";
 	WIN32_FIND_DATA ffd;
 	HANDLE hfd = FindFirstFile(L"C:\\sync\\*", &ffd);
@@ -137,17 +135,13 @@ VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		std::wcerr << L"Unable to open sync directory" << std::endl;
 	}
 
-	// Wait until our worker thread exits effectively signaling that the service needs to stop
 	std::unique_lock<std::mutex> lock(mutex);
 	cond.wait(lock);
 
 	for (size_t i = 0; i < dirs.size(); i++) {
 		delete dirs[i];
 		dirs[i] = 0;
-	}
-	/*
-	* Perform any cleanup tasks
-	*/
+
 #ifdef RUNASSERVICE
 	g_ServiceStatus.dwControlsAccepted = 0;
 	g_ServiceStatus.dwCurrentState = SERVICE_STOPPED;
@@ -171,10 +165,6 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode)
 		if (g_ServiceStatus.dwCurrentState != SERVICE_RUNNING)
 			break;
 
-		/*
-		* Perform tasks neccesary to stop the service here
-		*/
-
 		g_ServiceStatus.dwControlsAccepted = 0;
 		g_ServiceStatus.dwCurrentState = SERVICE_STOP_PENDING;
 		g_ServiceStatus.dwWin32ExitCode = 0;
@@ -184,7 +174,6 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode)
 		{
 		}
 
-		// This will signal the worker thread to start shutting down
 		cond.notify_all();
 
 		break;
