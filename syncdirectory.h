@@ -46,6 +46,7 @@ class SyncDirectory {
 		std::thread* thread_;
 		std::atomic<bool> exit_;
 		NETRESOURCE* resource_;
+    int last_error_;
 		bool connected_;
 
 		void run();

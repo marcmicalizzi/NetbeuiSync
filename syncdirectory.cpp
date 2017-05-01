@@ -25,7 +25,10 @@ SyncDirectory::SyncDirectory(NETRESOURCE& resouce, const std::wstring& localpath
 	exit_ = false;
 	resource_ = new NETRESOURCE;
 	memcpy(resource_, &resouce, sizeof(NETRESOURCE));
+  int rv = WNetCancelConnection2(resource_->lpLocalName, 0, true);
+  std::wcerr << "(" << resource_->lpLocalName << ") Initial disconnection returned " << rv << std::endl;
 	localpath_ = localpath;
+  last_error_ = 0;
 	std::wcerr << L"Creating SyncDirectory to " << localpath_ << std::endl;
 	thread_ = new std::thread(&SyncDirectory::run, this);
 }
@@ -52,8 +55,9 @@ void SyncDirectory::run() {
 			//std::wcerr << L"Got return status " << dwRetVal << L" from WNetAddConnection2 mapping " << resource_->lpRemoteName << " to " << resource_->lpLocalName << std::endl;
 			if (dwRetVal == NO_ERROR || dwRetVal == ERROR_ALREADY_ASSIGNED) {
 				DeleteFile((localpath_ + L"+OFFLINE.TXT").c_str());
+        std::wcerr << localpath_ << L"(" << resource_->lpLocalName << L") : Connecting..." << std::endl;
 				if (sync()) {
-					std::wcerr << localpath_ << ": Connected." << std::endl;
+					std::wcerr << localpath_ << L"(" << resource_->lpLocalName << L") : Connected." << std::endl;
 					connected_ = true;
 				} else {
 					std::wcerr << localpath_ << L": Sync failed (0)." << std::endl;
@@ -220,7 +224,7 @@ bool SyncDirectory::sync() {
 				if (CreateDirectory((dst_path + it->first).c_str(), 0) == 0) {
 					unsigned long error = GetLastError();
 					if (error != ERROR_ALREADY_EXISTS) {
-						std::wcerr << L"CreateDirectory failed: " << error << std::endl;
+						std::wcerr << L"(src->dst)CreateDirectory failed: " << error << std::endl;
 						return false;
 					}
 				}
@@ -228,15 +232,19 @@ bool SyncDirectory::sync() {
 				if (CopyFile((src_path + it->first).c_str(), (dst_path + it->first).c_str(), false) == 0) {
 					unsigned long error = GetLastError();
 					if (error == ERROR_SHARING_VIOLATION) {
-						std::wcerr << L"File still open, postponing copy" << std::endl;
+						std::wcerr << L"(src->dst)File still open, postponing copy" << std::endl;
 						continue;
 					} else if (error == ERROR_INVALID_NAME) {
 						std::wstring newfile = shortfile(it->first, src_path);
-						std::wcerr << L"Filename to long. Renaming to " << newfile << std::endl;
+						std::wcerr << L"(src->dst)Filename to long. Renaming to " << newfile << std::endl;
 						MoveFile((src_path + it->first).c_str(), (src_path + newfile).c_str());
 						continue;
-					}
-					std::wcerr << L"CopyFile failed: " << error << std::endl;
+          } else if (error == ERROR_ACCESS_DENIED) {
+            continue;
+          } else if (error == ERROR_FILE_NOT_FOUND) {
+            continue;
+          }
+					std::wcerr << L"(src->dst)CopyFile failed: " << error << std::endl;
 					return false;
 				}
 			}
@@ -255,13 +263,13 @@ bool SyncDirectory::sync() {
 				(*src_list)[it->first] = it->second;
 				dst_files[it->first] = prop;
 				if (!(prop.size == it->second.size)) {
-					std::wcerr << L"File Size Mismatch after Copy" << std::endl;
+					std::wcerr << L"(src->dst)File Size Mismatch after Copy" << std::endl;
 					(*src_list)[it->first].size.high = 0;
 					(*src_list)[it->first].size.low = 0;
 				}
 				FindClose(hfd);
 			} else {
-				std::wcerr << L"Unable to obtain handle on copied file." << std::endl;
+				std::wcerr << L"(src->dst)Unable to obtain handle on copied file." << std::endl;
 				return false;
 			}
 		}
@@ -272,12 +280,12 @@ bool SyncDirectory::sync() {
 		auto kt = dst_list->find(it->first);
 		//std::wcerr << L"Checking file " << dst_path << it->first << std::endl;
 		if ((jt == src_files.end() && (kt == src_list->end() || kt == dst_list->end())) || (kt != dst_list->end() && !(it->second == kt->second))) {
-			if (connected_) std::wcerr << L"Creating file " << src_path << it->first << L" (connected = " << connected_ << L")" << std::endl;
+			if (connected_) std::wcerr << L"(dst->src)Creating file " << src_path << it->first << L" (connected = " << connected_ << L")" << std::endl;
 			if (it->second.attributes & FILE_ATTRIBUTE_DIRECTORY) {
 				if (CreateDirectory((src_path + it->first).c_str(), 0) == 0) {
 					unsigned long error = GetLastError();
 					if (error != ERROR_ALREADY_EXISTS) {
-						std::wcerr << L"CreateDirectory failed: " << error << std::endl;
+						std::wcerr << L"(dst->src)CreateDirectory failed: " << error << std::endl;
 						return false;
 					}
 				}
@@ -285,15 +293,19 @@ bool SyncDirectory::sync() {
 				if (CopyFile((dst_path + it->first).c_str(), (src_path + it->first).c_str(), false) == 0) {
 					unsigned long error = GetLastError();
 					if (error == ERROR_SHARING_VIOLATION) {
-						std::wcerr << L"File still open, postponing copy" << std::endl;
+						std::wcerr << L"(dst->src)File still open, postponing copy" << std::endl;
 						continue;
 					} else if (error == ERROR_INVALID_NAME) {
 						std::wstring newfile = shortfile(it->first, dst_path);
-						std::wcerr << L"Filename to long. Renaming to " << newfile << std::endl;
+						std::wcerr << L"(dst->src)Filename to long. Renaming to " << newfile << std::endl;
 						MoveFile((dst_path + it->first).c_str(), (dst_path + newfile).c_str());
 						continue;
-					}
-					std::wcerr << L"CopyFile failed: " << error << std::endl;
+          } else if (error == ERROR_ACCESS_DENIED) {
+            continue;
+          } else if (error == ERROR_FILE_NOT_FOUND) {
+            continue;
+          }
+					std::wcerr << L"(dst->src)CopyFile failed: " << error << std::endl;
 				}
 			}
 			WIN32_FIND_DATA ffd;
@@ -311,14 +323,14 @@ bool SyncDirectory::sync() {
 				(*dst_list)[it->first] = it->second;
 				src_files[it->first] = prop;
 				if (!(prop.size == it->second.size)) {
-					std::wcerr << L"File Size Mismatch after Copy" << std::endl;
+					std::wcerr << L"(dst->src)File Size Mismatch after Copy" << std::endl;
 					(*dst_list)[it->first].size.high = 0;
 					(*dst_list)[it->first].size.low = 0;
 				}
 				FindClose(hfd);
 			}
 			else {
-				std::wcerr << L"Unable to obtain handle on copied file." << std::endl;
+				std::wcerr << L"(dst->src)Unable to obtain handle on copied file." << std::endl;
 				return false;
 			}
 		}
